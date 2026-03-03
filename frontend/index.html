@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PHG Cloud Storage</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Clash+Display:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── CONFIG: set BACKEND_URL below in the <script> section ── */
+
+:root {
+  --bg: #f5f2ed;
+  --surface: #faf8f5;
+  --surface2: #eee9e1;
+  --border: #ddd8cf;
+  --ink: #1a1714;
+  --ink2: #4a4540;
+  --ink3: #9a9390;
+  --accent: #c84b2f;
+  --accent2: #2f6bc8;
+  --accent3: #2fa869;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Space Mono', monospace;
+  min-height: 100vh;
+}
+
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none; z-index: 9999; opacity: .6;
+}
+
+/* ── Loading ── */
+#loadScreen {
+  position: fixed; inset: 0;
+  background: var(--ink);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 500; gap: 1.5rem;
+  transition: opacity .5s;
+}
+.load-logo { font-family: 'Clash Display', sans-serif; font-size: 1.8rem; font-weight: 700; color: var(--bg); }
+.load-logo span { color: var(--accent); }
+.load-bar-wrap { width: 200px; height: 2px; background: rgba(255,255,255,.15); border-radius: 99px; overflow: hidden; }
+.load-bar { height: 100%; background: var(--accent); border-radius: 99px; width: 0%; transition: width .4s ease; }
+.load-status { font-size: .65rem; color: rgba(255,255,255,.4); letter-spacing: .1em; text-transform: uppercase; }
+
+/* ── Layout ── */
+.layout { display: flex; min-height: 100vh; }
+
+/* Sidebar */
+.sidebar {
+  width: 240px; flex-shrink: 0;
+  background: var(--ink); color: var(--bg);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.sidebar-brand { padding: 1.75rem 1.5rem 1.25rem; border-bottom: 1px solid rgba(255,255,255,.08); }
+.brand-name { font-family: 'Clash Display', sans-serif; font-size: 1.1rem; font-weight: 700; letter-spacing: -.02em; }
+.brand-name span { color: var(--accent); }
+.brand-sub { font-size: .6rem; color: rgba(255,255,255,.3); margin-top: .2rem; letter-spacing: .1em; text-transform: uppercase; }
+
+.sidebar-section-label { font-size: .58rem; letter-spacing: .15em; text-transform: uppercase; color: rgba(255,255,255,.25); padding: 1.25rem 1.5rem .5rem; }
+
+.nav-item {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .6rem 1.5rem; font-size: .75rem;
+  color: rgba(255,255,255,.5); cursor: pointer;
+  transition: all .15s; border-left: 2px solid transparent;
+}
+.nav-item:hover { background: rgba(255,255,255,.05); color: rgba(255,255,255,.85); }
+.nav-item.active { background: rgba(200,75,47,.15); color: var(--bg); border-left-color: var(--accent); }
+.nav-icon { font-size: .9rem; width: 18px; text-align: center; }
+
+.sidebar-footer {
+  margin-top: auto; padding: 1rem 1.5rem;
+  border-top: 1px solid rgba(255,255,255,.08);
+  font-size: .65rem; color: rgba(255,255,255,.25); line-height: 1.6;
+}
+.storage-bar-wrap { height: 3px; background: rgba(255,255,255,.1); border-radius: 99px; margin: .5rem 0 .35rem; overflow: hidden; }
+.storage-bar-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width 1s ease; }
+
+/* Main */
+.main { flex: 1; display: flex; flex-direction: column; }
+
+.topbar {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: .9rem 2rem; display: flex; align-items: center; gap: 1rem;
+  position: sticky; top: 0; z-index: 10;
+}
+.search-wrap { flex: 1; position: relative; max-width: 420px; }
+.search-input {
+  width: 100%; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 4px; padding: .55rem 1rem .55rem 2.5rem;
+  font-family: 'Space Mono', monospace; font-size: .75rem; color: var(--ink);
+  outline: none; transition: border-color .2s;
+}
+.search-input:focus { border-color: var(--ink2); }
+.search-input::placeholder { color: var(--ink3); }
+.search-icon { position: absolute; left: .75rem; top: 50%; transform: translateY(-50%); font-size: .8rem; color: var(--ink3); pointer-events: none; }
+
+.topbar-right { display: flex; align-items: center; gap: .75rem; margin-left: auto; }
+
+.btn { font-family: 'Space Mono', monospace; font-size: .7rem; border-radius: 4px; padding: .5rem 1rem; cursor: pointer; transition: all .15s; border: 1px solid; display: flex; align-items: center; gap: .4rem; }
+.btn-primary { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.btn-primary:hover { background: var(--accent); border-color: var(--accent); }
+.btn-outline { background: transparent; border-color: var(--border); color: var(--ink2); }
+.btn-outline:hover { border-color: var(--ink2); color: var(--ink); }
+
+.content { padding: 2rem; flex: 1; }
+
+/* Breadcrumb */
+.breadcrumb { display: flex; align-items: center; gap: .4rem; font-size: .68rem; color: var(--ink3); margin-bottom: 1.5rem; }
+.bc-item { cursor: pointer; transition: color .15s; }
+.bc-item:hover { color: var(--ink); }
+.bc-item.current { color: var(--ink); cursor: default; }
+.bc-sep { color: var(--border); }
+
+/* Section header */
+.section-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.section-title { font-family: 'Clash Display', sans-serif; font-size: 1.6rem; font-weight: 600; letter-spacing: -.03em; }
+.section-meta { font-size: .65rem; color: var(--ink3); margin-top: .3rem; }
+.view-toggle { display: flex; gap: .25rem; }
+.view-btn { width: 30px; height: 30px; background: transparent; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: .85rem; display: flex; align-items: center; justify-content: center; transition: all .15s; color: var(--ink3); }
+.view-btn.active { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+
+/* Drop zone */
+.drop-zone {
+  border: 1.5px dashed var(--border); border-radius: 6px;
+  padding: 2.5rem 2rem; text-align: center; cursor: pointer;
+  transition: all .2s; margin-bottom: 1.75rem;
+}
+.drop-zone:hover, .drop-zone.drag { border-color: var(--accent); background: rgba(200,75,47,.04); }
+.drop-zone-icon { font-size: 2.5rem; margin-bottom: .75rem; display: block; }
+.drop-zone-title { font-family: 'Clash Display', sans-serif; font-size: 1.1rem; font-weight: 600; margin-bottom: .35rem; }
+.drop-zone-title span { color: var(--accent); }
+.drop-zone-sub { font-size: .7rem; color: var(--ink3); }
+
+/* Grid */
+.files-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .75rem; }
+.file-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1.25rem 1rem 1rem; cursor: pointer; transition: all .2s; position: relative; animation: fadeUp .25s ease both; }
+@keyframes fadeUp { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+.file-card:hover { border-color: var(--ink2); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+.file-card.selected { border-color: var(--accent); background: rgba(200,75,47,.04); }
+.file-card .f-icon { font-size: 2.2rem; display: block; margin-bottom: .75rem; }
+.file-card .f-name { font-size: .7rem; font-weight: 700; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+.file-card .f-meta { font-size: .6rem; color: var(--ink3); margin-top: .35rem; }
+.file-card .check-badge { position: absolute; top: .5rem; right: .5rem; width: 16px; height: 16px; background: var(--accent); border-radius: 50%; font-size: .55rem; color: #fff; display: none; align-items: center; justify-content: center; }
+.file-card.selected .check-badge { display: flex; }
+
+/* List */
+.list-head { display: grid; grid-template-columns: 1.5rem 1fr 140px 100px 80px 36px; gap: 1rem; padding: .5rem 1rem; font-size: .6rem; color: var(--ink3); letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--border); margin-bottom: .25rem; }
+.file-row { display: grid; grid-template-columns: 1.5rem 1fr 140px 100px 80px 36px; gap: 1rem; align-items: center; padding: .6rem 1rem; border-radius: 4px; cursor: pointer; font-size: .72rem; transition: background .15s; border: 1px solid transparent; animation: fadeUp .2s ease both; }
+.file-row:hover { background: var(--surface); border-color: var(--border); }
+.file-row.selected { background: rgba(200,75,47,.05); border-color: rgba(200,75,47,.3); }
+.file-row .fr-icon { font-size: 1rem; }
+.file-row .fr-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row .fr-owner, .file-row .fr-date, .file-row .fr-size { color: var(--ink3); }
+.file-row .fr-size { text-align: right; }
+.row-action { width: 28px; height: 28px; background: transparent; border: 1px solid var(--border); border-radius: 3px; cursor: pointer; font-size: .75rem; display: flex; align-items: center; justify-content: center; transition: all .15s; color: var(--ink3); }
+.row-action:hover { background: var(--surface2); border-color: var(--ink2); }
+
+/* States */
+.state-center { text-align: center; padding: 5rem 2rem; color: var(--ink3); }
+.state-icon { font-size: 3rem; margin-bottom: 1rem; }
+.state-title { font-family: 'Clash Display', sans-serif; font-size: 1.1rem; color: var(--ink2); margin-bottom: .4rem; }
+.state-sub { font-size: .72rem; }
+.spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; margin: 0 auto 1rem; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Context menu */
+.ctx-menu { position: fixed; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: .35rem; min-width: 168px; z-index: 1000; box-shadow: 0 8px 30px rgba(0,0,0,.12); display: none; animation: ctxIn .1s ease; }
+@keyframes ctxIn { from { opacity:0; transform: scale(.97) translateY(-4px); } to { opacity:1; transform: scale(1) translateY(0); } }
+.ctx-menu.show { display: block; }
+.ctx-item { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; border-radius: 3px; font-size: .72rem; cursor: pointer; color: var(--ink); transition: background .1s; }
+.ctx-item:hover { background: var(--surface2); }
+.ctx-item.danger { color: var(--accent); }
+.ctx-div { height: 1px; background: var(--border); margin: .3rem 0; }
+
+/* Selection bar */
+.sel-bar { position: fixed; bottom: 1.75rem; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); border-radius: 6px; padding: .7rem 1.25rem; display: none; align-items: center; gap: 1.25rem; font-size: .72rem; z-index: 200; box-shadow: 0 8px 30px rgba(0,0,0,.25); white-space: nowrap; }
+.sel-bar.show { display: flex; }
+.sel-count { color: var(--accent); font-weight: 700; }
+.sel-btn { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15); border-radius: 3px; padding: .3rem .75rem; color: var(--bg); font-family: 'Space Mono', monospace; font-size: .65rem; cursor: pointer; transition: all .15s; }
+.sel-btn:hover { background: rgba(255,255,255,.2); }
+.sel-btn.danger:hover { background: rgba(200,75,47,.4); border-color: var(--accent); }
+
+/* Upload progress */
+.upload-progress { position: fixed; bottom: 1.75rem; left: 1.75rem; background: var(--ink); color: var(--bg); border-radius: 6px; padding: 1rem 1.25rem; font-size: .7rem; min-width: 260px; max-width: 320px; z-index: 300; box-shadow: 0 4px 20px rgba(0,0,0,.2); display: none; }
+.upload-progress.show { display: block; }
+.up-queue { font-size: .65rem; color: rgba(255,255,255,.4); margin-bottom: .6rem; }
+.up-filename { font-weight: 700; margin-bottom: .5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-bar-wrap { height: 3px; background: rgba(255,255,255,.15); border-radius: 99px; overflow: hidden; }
+.up-bar { height: 100%; background: var(--accent3); border-radius: 99px; transition: width .2s ease; }
+.up-status { margin-top: .4rem; color: rgba(255,255,255,.4); font-size: .65rem; }
+
+/* Toasts */
+.toast-wrap { position: fixed; bottom: 1.75rem; right: 1.75rem; z-index: 2000; display: flex; flex-direction: column; gap: .5rem; }
+.toast { background: var(--ink); color: var(--bg); border-radius: 5px; padding: .7rem 1rem; font-size: .72rem; display: flex; align-items: center; gap: .75rem; min-width: 220px; max-width: 300px; box-shadow: 0 4px 16px rgba(0,0,0,.2); animation: toastIn .25s ease; }
+@keyframes toastIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+.t-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.toast.success .t-dot { background: var(--accent3); }
+.toast.error .t-dot { background: var(--accent); }
+.toast.info .t-dot { background: var(--accent2); }
+
+@media (max-width: 768px) {
+  .sidebar { width: 54px; }
+  .brand-name, .brand-sub, .nav-item > *:not(.nav-icon), .sidebar-section-label, .sidebar-footer .sf-text { display: none; }
+  .nav-item { padding: .75rem; justify-content: center; }
+  .content { padding: 1.25rem; }
+  .file-row { grid-template-columns: 1.5rem 1fr 80px; }
+  .file-row .fr-owner, .file-row .fr-date, .file-row .fr-size, .file-row .row-action { display: none; }
+  .list-head { grid-template-columns: 1.5rem 1fr 80px; }
+  .list-head .lh-owner, .list-head .lh-date, .list-head .lh-size, .list-head .lh-act { display: none; }
+  .drop-zone { padding: 1.5rem 1rem; }
+}
+</style>
+</head>
+<body>
+
+<div id="loadScreen">
+  <div class="load-logo">PHG <span>Cloud</span></div>
+  <div class="load-bar-wrap"><div class="load-bar" id="loadBar"></div></div>
+  <div class="load-status" id="loadStatus">Connecting…</div>
+</div>
+
+<div class="layout" id="app" style="display:none">
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-name">PHG <span>Cloud</span></div>
+      <div class="brand-sub">Storage Portal</div>
+    </div>
+    <div class="sidebar-section-label">Browse</div>
+    <div class="nav-item active" data-section="myDrive" onclick="switchSection('myDrive')">
+      <span class="nav-icon">🗂</span> My Drive
+    </div>
+    <div class="nav-item" data-section="shared" onclick="switchSection('shared')">
+      <span class="nav-icon">🤝</span> Shared with me
+    </div>
+    <div class="nav-item" data-section="recent" onclick="switchSection('recent')">
+      <span class="nav-icon">🕒</span> Recent
+    </div>
+    <div class="nav-item" data-section="starred" onclick="switchSection('starred')">
+      <span class="nav-icon">⭐</span> Starred
+    </div>
+    <div class="sidebar-section-label" style="margin-top:.5rem">Actions</div>
+    <div class="nav-item" onclick="triggerUpload()">
+      <span class="nav-icon">↑</span> Upload File
+    </div>
+    <div class="nav-item" onclick="newFolder()">
+      <span class="nav-icon">+</span> New Folder
+    </div>
+    <div class="sidebar-footer">
+      <div class="sf-text" style="margin-bottom:.25rem">Storage</div>
+      <div class="storage-bar-wrap"><div class="storage-bar-fill" id="storageFill" style="width:0%"></div></div>
+      <div id="storageText" class="sf-text">—</div>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input class="search-input" id="searchInput" placeholder="Search files and folders…" oninput="handleSearch(this.value)">
+      </div>
+      <div class="topbar-right">
+        <button class="btn btn-outline" onclick="loadFiles()">↻ Refresh</button>
+        <button class="btn btn-primary" onclick="triggerUpload()">↑ Upload</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="breadcrumb" id="breadcrumb"></div>
+      <div class="section-header">
+        <div>
+          <div class="section-title" id="sectionTitle">My Drive</div>
+          <div class="section-meta" id="sectionMeta"></div>
+        </div>
+        <div class="view-toggle">
+          <button class="view-btn active" id="gridBtn" onclick="setView('grid')" title="Grid">⊞</button>
+          <button class="view-btn" id="listBtn" onclick="setView('list')" title="List">≡</button>
+        </div>
+      </div>
+
+      <div class="drop-zone" id="dropZone"
+        onclick="triggerUpload()"
+        ondragover="onDragOver(event)" ondragleave="onDragLeave()" ondrop="onDrop(event)">
+        <span class="drop-zone-icon">☁️</span>
+        <div class="drop-zone-title"><span>Drop files here</span> to upload</div>
+        <div class="drop-zone-sub">Or click to select files — they'll go straight to your company Drive</div>
+      </div>
+
+      <div id="filesContainer"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Context Menu -->
+<div class="ctx-menu" id="ctxMenu">
+  <div class="ctx-item" onclick="ctxAction('open')">📂 Open</div>
+  <div class="ctx-item" onclick="ctxAction('download')">⬇ Download</div>
+  <div class="ctx-item" onclick="ctxAction('star')">⭐ Star / Unstar</div>
+  <div class="ctx-div"></div>
+  <div class="ctx-item" onclick="ctxAction('rename')">✏ Rename</div>
+  <div class="ctx-div"></div>
+  <div class="ctx-item danger" onclick="ctxAction('trash')">🗑 Move to Trash</div>
+</div>
+
+<!-- Selection Bar -->
+<div class="sel-bar" id="selBar">
+  <span><span class="sel-count" id="selCount">0</span> selected</span>
+  <button class="sel-btn" onclick="bulkDownload()">⬇ Download</button>
+  <button class="sel-btn" onclick="bulkStar()">⭐ Star</button>
+  <button class="sel-btn danger" onclick="bulkTrash()">🗑 Trash</button>
+  <button class="sel-btn" onclick="clearSel()">✕ Clear</button>
+</div>
+
+<!-- Upload Progress -->
+<div class="upload-progress" id="uploadProg">
+  <div class="up-queue" id="upQueue"></div>
+  <div class="up-filename" id="upName">Uploading…</div>
+  <div class="up-bar-wrap"><div class="up-bar" id="upBar" style="width:0%"></div></div>
+  <div class="up-status" id="upStatus">Preparing…</div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+<input type="file" id="fileInput" multiple style="display:none" onchange="handleFiles(this.files)">
+
+<script>
+// ════════════════════════════════════════════════
+//  ⚙️  CONFIGURATION — change this to your backend URL
+// ════════════════════════════════════════════════
+const BACKEND_URL = 'https://YOUR-BACKEND-URL.railway.app'; // ← CHANGE THIS
+
+// ════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════
+let accessToken   = null;
+let tokenExpiry   = 0;
+let uploadFolder  = 'root';
+let currentFolder = 'root';
+let folderStack   = [{ id: 'root', name: 'My Drive' }];
+let currentSection = 'myDrive';
+let currentView   = 'grid';
+let allFiles      = [];
+let selectedIds   = new Set();
+let ctxFile       = null;
+let searchTimer;
+let uploadQueue   = [];
+let isUploading   = false;
+
+// ════════════════════════════════════════════════
+//  TOKEN — fetched from backend, never exposed
+// ════════════════════════════════════════════════
+async function getToken() {
+  if (accessToken && Date.now() < tokenExpiry - 60000) return accessToken;
+  const r = await fetch(`${BACKEND_URL}/token`);
+  if (!r.ok) throw new Error('Backend unreachable — is the server running?');
+  const data = await r.json();
+  if (data.error) throw new Error(data.error);
+  accessToken  = data.access_token;
+  tokenExpiry  = Date.now() + (data.expires_in * 1000);
+  uploadFolder = data.upload_folder || 'root';
+  return accessToken;
+}
+
+async function driveReq(path, opts = {}) {
+  const tok = await getToken();
+  const sep = path.includes('?') ? '&' : '?';
+  const r = await fetch(
+    `https://www.googleapis.com/drive/v3${path}${sep}supportsAllDrives=true`,
+    { ...opts, headers: { Authorization: `Bearer ${tok}`, ...(opts.headers || {}) } }
+  );
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: { message: r.statusText } }));
+    throw new Error(err.error?.message || r.statusText);
+  }
+  if (r.status === 204) return null;
+  const ct = r.headers.get('content-type') || '';
+  return ct.includes('application/json') ? r.json() : r;
+}
+
+// ════════════════════════════════════════════════
+//  BOOT
+// ════════════════════════════════════════════════
+function setLoad(msg, pct) {
+  document.getElementById('loadStatus').textContent = msg;
+  document.getElementById('loadBar').style.width = pct + '%';
+}
+
+async function boot() {
+  try {
+    setLoad('Connecting to backend…', 20);
+    await getToken();
+    setLoad('Loading storage info…', 60);
+    await loadStorageInfo();
+    setLoad('Ready!', 100);
+    await new Promise(r => setTimeout(r, 400));
+    const ls = document.getElementById('loadScreen');
+    ls.style.opacity = '0';
+    setTimeout(() => { ls.style.display = 'none'; document.getElementById('app').style.display = 'flex'; }, 500);
+    updateBreadcrumb();
+    loadFiles();
+  } catch(e) {
+    document.getElementById('loadStatus').textContent = '✗ ' + e.message;
+    document.getElementById('loadBar').style.background = '#c84b2f';
+    document.getElementById('loadBar').style.width = '100%';
+  }
+}
+
+async function loadStorageInfo() {
+  try {
+    const data = await driveReq('/about?fields=storageQuota,user');
+    const q = data.storageQuota;
+    const used  = parseInt(q.usage  || 0);
+    const total = parseInt(q.limit  || 15 * 1024 ** 3);
+    const pct   = Math.round(used / total * 100);
+    document.getElementById('storageFill').style.width = pct + '%';
+    document.getElementById('storageText').textContent = `${fmtSize(used)} / ${fmtSize(total)}`;
+  } catch(e) {}
+}
+
+// ════════════════════════════════════════════════
+//  FILE LOADING
+// ════════════════════════════════════════════════
+async function loadFiles(search = '') {
+  const c = document.getElementById('filesContainer');
+  c.innerHTML = `<div class="state-center"><div class="spinner"></div><div class="state-sub">Loading…</div></div>`;
+  selectedIds.clear(); updateSelBar();
+
+  try {
+    let q = '';
+    if (search) {
+      q = `name contains '${search.replace(/'/g,"\\'")}' and trashed = false`;
+    } else if (currentSection === 'myDrive') {
+      q = `'${currentFolder}' in parents and trashed = false`;
+    } else if (currentSection === 'shared') {
+      q = `sharedWithMe = true and trashed = false`;
+    } else if (currentSection === 'recent') {
+      q = `trashed = false`;
+    } else if (currentSection === 'starred') {
+      q = `starred = true and trashed = false`;
+    }
+
+    const params = new URLSearchParams({
+      q,
+      fields: 'files(id,name,mimeType,size,modifiedTime,owners,starred,webViewLink)',
+      orderBy: currentSection === 'recent' ? 'viewedByMeTime desc' : 'folder,name',
+      pageSize: '100',
+      includeItemsFromAllDrives: 'true',
+      corpora: 'allDrives'
+    });
+
+    const data = await driveReq(`/files?${params}`);
+    allFiles = data.files || [];
+    document.getElementById('sectionMeta').textContent = `${allFiles.length} item${allFiles.length !== 1 ? 's' : ''}`;
+    renderFiles(allFiles);
+  } catch(e) {
+    c.innerHTML = `<div class="state-center"><div class="state-icon">⚠️</div><div class="state-title">Error</div><div class="state-sub">${escHtml(e.message)}</div></div>`;
+  }
+}
+
+function renderFiles(files) {
+  const c = document.getElementById('filesContainer');
+  if (!files.length) {
+    c.innerHTML = `<div class="state-center"><div class="state-icon">📭</div><div class="state-title">Nothing here</div><div class="state-sub">This folder is empty</div></div>`;
+    return;
+  }
+
+  if (currentView === 'grid') {
+    c.innerHTML = `<div class="files-grid" id="grid"></div>`;
+    const g = document.getElementById('grid');
+    files.forEach((f, i) => {
+      const el = document.createElement('div');
+      el.className = 'file-card' + (selectedIds.has(f.id) ? ' selected' : '');
+      el.style.animationDelay = `${i * 25}ms`;
+      el.dataset.id = f.id;
+      el.innerHTML = `<span class="f-icon">${fileIcon(f.mimeType)}</span><div class="f-name">${escHtml(f.name)}</div><div class="f-meta">${fmtDate(f.modifiedTime)}${f.size ? ' · ' + fmtSize(f.size) : ''}</div><div class="check-badge">✓</div>`;
+      el.addEventListener('click', e => onFileClick(e, f));
+      el.addEventListener('dblclick', () => openFile(f));
+      el.addEventListener('contextmenu', e => showCtx(e, f));
+      g.appendChild(el);
+    });
+  } else {
+    c.innerHTML = `<div class="list-head"><span></span><span>Name</span><span class="lh-owner">Owner</span><span class="lh-date">Modified</span><span class="lh-size" style="text-align:right">Size</span><span class="lh-act"></span></div><div class="files-list" id="flist"></div>`;
+    const list = document.getElementById('flist');
+    files.forEach((f, i) => {
+      const el = document.createElement('div');
+      el.className = 'file-row' + (selectedIds.has(f.id) ? ' selected' : '');
+      el.style.animationDelay = `${i * 20}ms`;
+      el.dataset.id = f.id;
+      el.innerHTML = `<span class="fr-icon">${fileIcon(f.mimeType)}</span><span class="fr-name">${escHtml(f.name)}</span><span class="fr-owner">${f.owners?.[0]?.displayName || '—'}</span><span class="fr-date">${fmtDate(f.modifiedTime)}</span><span class="fr-size">${f.size ? fmtSize(f.size) : '—'}</span><button class="row-action" onclick="showCtxBtn(event,'${f.id}')">⋯</button>`;
+      el.addEventListener('click', e => { if (e.target.classList.contains('row-action')) return; onFileClick(e, f); });
+      el.addEventListener('dblclick', () => openFile(f));
+      el.addEventListener('contextmenu', e => showCtx(e, f));
+      list.appendChild(el);
+    });
+  }
+}
+
+// ════════════════════════════════════════════════
+//  NAVIGATION
+// ════════════════════════════════════════════════
+function openFile(f) {
+  if (f.mimeType === 'application/vnd.google-apps.folder') {
+    currentSection = 'myDrive';
+    document.querySelectorAll('.nav-item[data-section]').forEach(n => n.classList.toggle('active', n.dataset.section === 'myDrive'));
+    document.getElementById('sectionTitle').textContent = f.name;
+    folderStack.push({ id: f.id, name: f.name });
+    currentFolder = f.id;
+    updateBreadcrumb();
+    loadFiles();
+  } else if (f.webViewLink) {
+    window.open(f.webViewLink, '_blank');
+  } else {
+    showToast('No preview available', 'info');
+  }
+}
+
+function navTo(id) {
+  const idx = folderStack.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  folderStack = folderStack.slice(0, idx + 1);
+  currentFolder = id;
+  currentSection = 'myDrive';
+  document.querySelectorAll('.nav-item[data-section]').forEach(n => n.classList.toggle('active', n.dataset.section === 'myDrive'));
+  document.getElementById('sectionTitle').textContent = folderStack[folderStack.length - 1].name;
+  updateBreadcrumb();
+  loadFiles();
+}
+
+function updateBreadcrumb() {
+  document.getElementById('breadcrumb').innerHTML = folderStack.map((f, i) => {
+    const last = i === folderStack.length - 1;
+    return `${i > 0 ? '<span class="bc-sep"> / </span>' : ''}<span class="bc-item ${last ? 'current' : ''}" onclick="navTo('${f.id}')">${escHtml(f.name)}</span>`;
+  }).join('');
+}
+
+function switchSection(sec) {
+  currentSection = sec;
+  document.querySelectorAll('.nav-item[data-section]').forEach(n => n.classList.toggle('active', n.dataset.section === sec));
+  folderStack = [{ id: 'root', name: 'My Drive' }];
+  currentFolder = 'root';
+  updateBreadcrumb();
+  const titles = { myDrive:'My Drive', shared:'Shared with me', recent:'Recent', starred:'Starred' };
+  document.getElementById('sectionTitle').textContent = titles[sec] || sec;
+  loadFiles();
+}
+
+// ════════════════════════════════════════════════
+//  SELECTION
+// ════════════════════════════════════════════════
+function onFileClick(e, f) {
+  if (!e.ctrlKey && !e.metaKey && !e.shiftKey) return;
+  if (selectedIds.has(f.id)) selectedIds.delete(f.id);
+  else selectedIds.add(f.id);
+  document.querySelector(`[data-id="${f.id}"]`)?.classList.toggle('selected', selectedIds.has(f.id));
+  updateSelBar();
+}
+function updateSelBar() {
+  document.getElementById('selBar').classList.toggle('show', selectedIds.size > 0);
+  document.getElementById('selCount').textContent = selectedIds.size;
+}
+function clearSel() {
+  selectedIds.clear();
+  document.querySelectorAll('.file-card.selected,.file-row.selected').forEach(el => el.classList.remove('selected'));
+  updateSelBar();
+}
+async function bulkDownload() { for (const id of selectedIds) { const f = allFiles.find(x => x.id === id); if (f) await downloadFile(f); } clearSel(); }
+async function bulkStar() {
+  for (const id of selectedIds) { try { await driveReq(`/files/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({starred:true}) }); } catch(e) {} }
+  showToast(`Starred ${selectedIds.size} files`, 'success'); clearSel(); loadFiles();
+}
+async function bulkTrash() {
+  const n = selectedIds.size;
+  for (const id of selectedIds) { try { await driveReq(`/files/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({trashed:true}) }); } catch(e) {} }
+  showToast(`Moved ${n} to trash`, 'success'); clearSel(); loadFiles();
+}
+
+// ════════════════════════════════════════════════
+//  CONTEXT MENU
+// ════════════════════════════════════════════════
+function showCtx(e, f) {
+  e.preventDefault(); ctxFile = f;
+  const m = document.getElementById('ctxMenu');
+  m.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+  m.style.top  = Math.min(e.clientY, window.innerHeight - 220) + 'px';
+  m.classList.add('show');
+}
+function showCtxBtn(e, id) {
+  e.stopPropagation();
+  ctxFile = allFiles.find(f => f.id === id);
+  const r = e.currentTarget.getBoundingClientRect();
+  const m = document.getElementById('ctxMenu');
+  m.style.left = (r.right - 168) + 'px';
+  m.style.top  = (r.bottom + 4) + 'px';
+  m.classList.add('show');
+}
+document.addEventListener('click', () => document.getElementById('ctxMenu').classList.remove('show'));
+
+async function ctxAction(action) {
+  if (!ctxFile) return;
+  const f = ctxFile;
+  if (action === 'open') { openFile(f); }
+  else if (action === 'download') { await downloadFile(f); }
+  else if (action === 'star') {
+    await driveReq(`/files/${f.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({starred:!f.starred}) });
+    showToast((f.starred ? 'Unstarred' : 'Starred') + ': ' + f.name, 'success');
+    loadFiles();
+  } else if (action === 'rename') {
+    const name = prompt('New name:', f.name);
+    if (name && name !== f.name) {
+      await driveReq(`/files/${f.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+      showToast('Renamed to: ' + name, 'success'); loadFiles();
+    }
+  } else if (action === 'trash') {
+    await driveReq(`/files/${f.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({trashed:true}) });
+    showToast('Moved to trash: ' + f.name, 'success'); loadFiles();
+  }
+}
+
+// ════════════════════════════════════════════════
+//  UPLOAD — queued, chunked, with progress
+// ════════════════════════════════════════════════
+function triggerUpload() { document.getElementById('fileInput').click(); }
+function handleFiles(files) { uploadQueue.push(...Array.from(files)); processQueue(); }
+function onDragOver(e) { e.preventDefault(); document.getElementById('dropZone').classList.add('drag'); }
+function onDragLeave() { document.getElementById('dropZone').classList.remove('drag'); }
+function onDrop(e) { e.preventDefault(); document.getElementById('dropZone').classList.remove('drag'); handleFiles(e.dataTransfer.files); }
+
+async function processQueue() {
+  if (isUploading || uploadQueue.length === 0) return;
+  isUploading = true;
+  while (uploadQueue.length > 0) {
+    const file = uploadQueue.shift();
+    await uploadFile(file);
+  }
+  isUploading = false;
+  document.getElementById('uploadProg').classList.remove('show');
+  loadFiles();
+}
+
+async function uploadFile(file) {
+  const prog    = document.getElementById('uploadProg');
+  const queueEl = document.getElementById('upQueue');
+  const nameEl  = document.getElementById('upName');
+  const barEl   = document.getElementById('upBar');
+  const statusEl= document.getElementById('upStatus');
+
+  prog.classList.add('show');
+  queueEl.textContent  = uploadQueue.length > 0 ? `${uploadQueue.length + 1} files remaining` : '';
+  nameEl.textContent   = file.name;
+  barEl.style.width    = '0%';
+  statusEl.textContent = 'Preparing…';
+
+  // Destination: upload to uploadFolder (set by backend), or current folder if browsing
+  const targetFolder = (currentSection === 'myDrive' && currentFolder !== 'root')
+    ? currentFolder
+    : uploadFolder;
+
+  try {
+    const tok = await getToken();
+
+    if (file.size <= 5 * 1024 * 1024) {
+      // ── Multipart for small files ──
+      statusEl.textContent = 'Uploading…';
+      barEl.style.width = '50%';
+      const boundary = 'phgboundary' + Date.now();
+      const meta = JSON.stringify({ name: file.name, parents: [targetFolder] });
+      const fileData = await file.arrayBuffer();
+      const enc = new TextEncoder();
+      const body = new Uint8Array([
+        ...enc.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`),
+        ...enc.encode(meta),
+        ...enc.encode(`\r\n--${boundary}\r\nContent-Type: ${file.type || 'application/octet-stream'}\r\n\r\n`),
+        ...new Uint8Array(fileData),
+        ...enc.encode(`\r\n--${boundary}--`)
+      ]);
+      const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tok}`, 'Content-Type': `multipart/related; boundary="${boundary}"` },
+        body
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error?.message || `HTTP ${r.status}`);
+      }
+    } else {
+      // ── Resumable for large files ──
+      const initR = await fetch(`https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tok}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': file.type || 'application/octet-stream',
+          'X-Upload-Content-Length': file.size
+        },
+        body: JSON.stringify({ name: file.name, parents: [targetFolder] })
+      });
+      if (!initR.ok) {
+        const err = await initR.json().catch(() => ({}));
+        throw new Error(err.error?.message || `HTTP ${initR.status}`);
+      }
+      const uploadUrl = initR.headers.get('location');
+      if (!uploadUrl) throw new Error('No upload URL returned');
+
+      const CHUNK = 5 * 1024 * 1024;
+      let offset = 0;
+      while (offset < file.size) {
+        const end = Math.min(offset + CHUNK, file.size);
+        statusEl.textContent = `${fmtSize(offset)} / ${fmtSize(file.size)}`;
+        barEl.style.width = Math.round(offset / file.size * 100) + '%';
+        const r = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Range': `bytes ${offset}-${end-1}/${file.size}`, 'Content-Type': file.type || 'application/octet-stream' },
+          body: file.slice(offset, end)
+        });
+        if (r.status !== 200 && r.status !== 201 && r.status !== 308) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.error?.message || `Chunk failed: HTTP ${r.status}`);
+        }
+        offset = end;
+      }
+    }
+
+    barEl.style.width = '100%';
+    statusEl.textContent = 'Done!';
+    showToast('Uploaded: ' + file.name, 'success');
+  } catch(e) {
+    statusEl.textContent = '✗ Failed';
+    showToast('Upload failed: ' + e.message, 'error');
+    console.error('Upload error:', e);
+  }
+}
+
+// ════════════════════════════════════════════════
+//  DOWNLOAD
+// ════════════════════════════════════════════════
+async function downloadFile(f) {
+  const exportMap = {
+    'application/vnd.google-apps.document': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.google-apps.spreadsheet': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.google-apps.presentation': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  };
+  if (f.mimeType.startsWith('application/vnd.google-apps.') && !exportMap[f.mimeType]) {
+    showToast('Cannot download this file type', 'error'); return;
+  }
+  try {
+    const tok = await getToken();
+    const url = exportMap[f.mimeType]
+      ? `https://www.googleapis.com/drive/v3/files/${f.id}/export?mimeType=${encodeURIComponent(exportMap[f.mimeType])}`
+      : `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media&supportsAllDrives=true`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}` } });
+    if (!r.ok) throw new Error(r.statusText);
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = f.name;
+    a.click();
+    showToast('Downloaded: ' + f.name, 'success');
+  } catch(e) { showToast('Download failed: ' + e.message, 'error'); }
+}
+
+// ════════════════════════════════════════════════
+//  NEW FOLDER
+// ════════════════════════════════════════════════
+async function newFolder() {
+  const name = prompt('Folder name:');
+  if (!name) return;
+  try {
+    await driveReq('/files', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [currentFolder] })
+    });
+    showToast('Created: ' + name, 'success'); loadFiles();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ════════════════════════════════════════════════
+//  UTILITIES
+// ════════════════════════════════════════════════
+function handleSearch(v) { clearTimeout(searchTimer); searchTimer = setTimeout(() => loadFiles(v.trim()), 400); }
+function setView(v) {
+  currentView = v;
+  document.getElementById('gridBtn').classList.toggle('active', v === 'grid');
+  document.getElementById('listBtn').classList.toggle('active', v === 'list');
+  renderFiles(allFiles);
+}
+
+function fileIcon(mt) {
+  if (!mt) return '📄';
+  if (mt === 'application/vnd.google-apps.folder') return '📁';
+  if (mt.includes('google-apps.document'))     return '📝';
+  if (mt.includes('google-apps.spreadsheet'))  return '📊';
+  if (mt.includes('google-apps.presentation')) return '📽';
+  if (mt.includes('google-apps.form'))         return '📋';
+  if (mt.includes('image/'))  return '🖼';
+  if (mt.includes('video/'))  return '🎬';
+  if (mt.includes('audio/'))  return '🎵';
+  if (mt.includes('pdf'))     return '📕';
+  if (mt.includes('zip') || mt.includes('rar') || mt.includes('7z')) return '🗜';
+  if (mt.includes('word'))    return '📘';
+  if (mt.includes('sheet') || mt.includes('excel')) return '📗';
+  if (mt.includes('presentation')) return '📙';
+  return '📄';
+}
+function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'2-digit' }); }
+function fmtSize(b) {
+  b = parseInt(b); if (!b) return '—';
+  if (b < 1024) return b + ' B';
+  if (b < 1024**2) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1024**3) return (b/1024**2).toFixed(1) + ' MB';
+  return (b/1024**3).toFixed(2) + ' GB';
+}
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function showToast(msg, type = 'info') {
+  const wrap = document.getElementById('toasts');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.innerHTML = `<div class="t-dot"></div><span>${escHtml(msg)}</span>`;
+  wrap.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); }, 3500);
+}
+
+boot();
+</script>
+</body>
+</html>
