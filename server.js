@@ -1,7 +1,6 @@
 const express = require('express');
 const cors    = require('cors');
 const crypto  = require('crypto');
-const fetch   = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 const app     = express();
 
 app.use(cors({
@@ -14,7 +13,6 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// ── Config ────────────────────────────────────────────────────────
 const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN;
@@ -22,7 +20,7 @@ const UPLOAD_FOLDER = process.env.UPLOAD_FOLDER_ID || 'root';
 const SHEET_ID      = process.env.USERS_SHEET_ID;
 const PORT          = process.env.PORT || 3000;
 
-// ── Google token cache ────────────────────────────────────────────
+// ── Google token ──────────────────────────────────────────────────
 let cachedToken = null, tokenExpiry = 0;
 
 async function getDriveToken() {
@@ -30,7 +28,7 @@ async function getDriveToken() {
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, refresh_token: REFRESH_TOKEN, grant_type: 'refresh_token' }),
+    body: new URLSearchParams({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, refresh_token: REFRESH_TOKEN, grant_type: 'refresh_token' }).toString(),
   });
   const data = await r.json();
   if (!r.ok || !data.access_token) throw new Error('Token refresh failed: ' + (data.error_description || data.error));
@@ -55,15 +53,13 @@ function validateSession(token) {
   if (Date.now() > s.expires) { sessions.delete(token); return null; }
   return s;
 }
-setInterval(() => { for (const [k,v] of sessions) if (Date.now() > v.expires) sessions.delete(k); }, 3600000);
-
 function requireAuth(req, res, next) {
   const s = validateSession(req.headers['x-session-token']);
   if (!s) return res.status(401).json({ error: 'Unauthorized' });
   req.session = s; next();
 }
 
-// ── Users from Google Sheet ───────────────────────────────────────
+// ── Users from Sheet ──────────────────────────────────────────────
 let usersCache = null, usersCacheTime = 0;
 
 async function getUsers() {
@@ -82,7 +78,6 @@ async function getUsers() {
 }
 
 // ── Routes ────────────────────────────────────────────────────────
-
 app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
 app.post('/login', async (req, res) => {
@@ -110,12 +105,12 @@ app.get('/token', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Sheets API proxy
 app.all('/sheets/*', requireAuth, async (req, res) => {
   try {
     const tok = await getDriveToken();
     const path = req.path.replace('/sheets', '');
-    const url = `https://sheets.googleapis.com/v4/spreadsheets${path}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`;
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    const url = `https://sheets.googleapis.com/v4/spreadsheets${path}${qs}`;
     const opts = { method: req.method, headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' } };
     if (['POST','PUT','PATCH'].includes(req.method) && req.body) opts.body = JSON.stringify(req.body);
     const r = await fetch(url, opts);
@@ -125,7 +120,6 @@ app.all('/sheets/*', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// QR code generator
 app.get('/qr/generate', requireAuth, async (req, res) => {
   try {
     const { data, size = 200 } = req.query;
