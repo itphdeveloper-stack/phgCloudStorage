@@ -147,7 +147,12 @@ app.post('/log', requireAuth, async (req, res) => {
       headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: [[timeStr, user, action, detail]] })
     });
-    if (!r.ok) { const e = await r.json(); return res.status(500).json({ error: e.error?.message }); }
+    if (!r.ok) {
+      const errText = await r.text();
+      let errMsg = 'Sheets append failed';
+      try { errMsg = JSON.parse(errText).error?.message || errMsg; } catch (_) {}
+      return res.status(500).json({ error: errMsg });
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -159,8 +164,15 @@ app.get('/log', requireAuth, async (req, res) => {
     const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A1:D1000`, {
       headers: { Authorization: `Bearer ${tok}` }
     });
-    const data = await r.json();
-    if (data.error) return res.status(500).json({ error: data.error.message });
+    const rawText = await r.text();
+    let data;
+    try { data = JSON.parse(rawText); }
+    catch (e) { return res.status(500).json({ error: 'Sheets API returned non-JSON. Check that Sheet3 exists in your spreadsheet.' }); }
+    if (data.error) {
+      // Sheet3 not found — return empty log instead of crashing
+      if (data.error.code === 400 || data.error.status === 'INVALID_ARGUMENT') return res.json({ rows: [] });
+      return res.status(500).json({ error: data.error.message });
+    }
     const rows = (data.values || []).slice(1).filter(r => r[0]);
     // Filter last 3 months
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 3);
