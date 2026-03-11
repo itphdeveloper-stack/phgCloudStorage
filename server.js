@@ -132,6 +132,43 @@ app.get('/qr/generate', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Activity Log ──────────────────────────────────────────────────
+app.post('/log', requireAuth, async (req, res) => {
+  try {
+    const { action, detail = '' } = req.body;
+    if (!action) return res.status(400).json({ error: 'action required' });
+    if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });
+    const tok = await getDriveToken();
+    const now = new Date();
+    const timeStr = now.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const user = req.session.username || '—';
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A:D/append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [[timeStr, user, action, detail]] })
+    });
+    if (!r.ok) { const e = await r.json(); return res.status(500).json({ error: e.error?.message }); }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/log', requireAuth, async (req, res) => {
+  try {
+    if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });
+    const tok = await getDriveToken();
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A1:D1000`, {
+      headers: { Authorization: `Bearer ${tok}` }
+    });
+    const data = await r.json();
+    if (data.error) return res.status(500).json({ error: data.error.message });
+    const rows = (data.values || []).slice(1).filter(r => r[0]);
+    // Filter last 3 months
+    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 3);
+    const filtered = rows.filter(r => { const d = new Date(r[0]); return isNaN(d) || d >= cutoff; });
+    res.json({ rows: filtered.reverse() }); // newest first
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 if (require.main === module) {
   app.listen(PORT, () => console.log(`✅  PHG Portal running on port ${PORT}`));
 }
