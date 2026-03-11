@@ -142,15 +142,16 @@ app.post('/log', requireAuth, async (req, res) => {
     const now = new Date();
     const timeStr = now.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
     const user = req.session.username || '—';
-    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A:D/append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A1:D1/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: [[timeStr, user, action, detail]] })
     });
+    const rawText = await r.text();
     if (!r.ok) {
-      const errText = await r.text();
       let errMsg = 'Sheets append failed';
-      try { errMsg = JSON.parse(errText).error?.message || errMsg; } catch (_) {}
+      try { errMsg = JSON.parse(rawText).error?.message || errMsg; } catch (_) {}
+      console.error('Sheets append error:', r.status, rawText.slice(0, 400));
       return res.status(500).json({ error: errMsg });
     }
     res.json({ ok: true });
@@ -167,9 +168,8 @@ app.get('/log', requireAuth, async (req, res) => {
     const rawText = await r.text();
     let data;
     try { data = JSON.parse(rawText); }
-    catch (e) { return res.status(500).json({ error: 'Sheets API returned non-JSON. Check that Sheet3 exists in your spreadsheet.' }); }
+    catch (e) { return res.status(500).json({ error: 'Sheets API returned non-JSON. Ensure Sheet3 exists.' }); }
     if (data.error) {
-      // Sheet3 not found — return empty log instead of crashing
       if (data.error.code === 400 || data.error.status === 'INVALID_ARGUMENT') return res.json({ rows: [] });
       return res.status(500).json({ error: data.error.message });
     }
