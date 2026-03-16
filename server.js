@@ -140,7 +140,7 @@ app.post('/log', requireAuth, async (req, res) => {
     if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });
     const tok = await getDriveToken();
     const now = new Date();
-    const timeStr = now.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const timeStr = now.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone:'Asia/Jakarta' });
     const user = req.session.username || '—';
     const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A:D:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
       method: 'POST',
