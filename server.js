@@ -132,21 +132,6 @@ app.get('/qr/generate', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Diagnostic: test Sheet3 write ────────────────────────────────
-app.get('/test-log', requireAuth, async (req, res) => {
-  try {
-    const tok = await getDriveToken();
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A2:D/append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [['TEST', 'diagnostic', 'test-log', new Date().toISOString()]] })
-    });
-    const txt = await r.text();
-    res.json({ status: r.status, url, body: txt.slice(0, 500) });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
 // ── Activity Log ──────────────────────────────────────────────────
 app.post('/log', requireAuth, async (req, res) => {
   try {
@@ -157,18 +142,12 @@ app.post('/log', requireAuth, async (req, res) => {
     const now = new Date();
     const timeStr = now.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
     const user = req.session.username || '—';
-    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A2:D/append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A:D:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: [[timeStr, user, action, detail]] })
     });
-    const rawText = await r.text();
-    if (!r.ok) {
-      let errMsg = 'Sheets append failed';
-      try { errMsg = JSON.parse(rawText).error?.message || errMsg; } catch (_) {}
-      console.error('Sheets append error:', r.status, rawText.slice(0, 400));
-      return res.status(500).json({ error: errMsg });
-    }
+    if (!r.ok) { const txt=await r.text(); let msg='Sheets append failed'; try{msg=JSON.parse(txt).error?.message||msg;}catch(_){} return res.status(500).json({ error: msg }); }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -180,14 +159,8 @@ app.get('/log', requireAuth, async (req, res) => {
     const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A1:D1000`, {
       headers: { Authorization: `Bearer ${tok}` }
     });
-    const rawText = await r.text();
-    let data;
-    try { data = JSON.parse(rawText); }
-    catch (e) { return res.status(500).json({ error: 'Sheets API returned non-JSON.' }); }
-    if (data.error) {
-      if (data.error.code === 400 || data.error.status === 'INVALID_ARGUMENT') return res.json({ rows: [] });
-      return res.status(500).json({ error: data.error.message });
-    }
+    const data = await r.json();
+    if (data.error) return res.status(500).json({ error: data.error.message });
     const rows = (data.values || []).slice(1).filter(r => r[0]);
     // Filter last 3 months
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 3);
