@@ -162,8 +162,8 @@ app.get('/log', requireAuth, async (req, res) => {
     const data = await r.json();
     if (data.error) return res.status(500).json({ error: data.error.message });
     const rows = (data.values || []).slice(1).filter(r => r[0]);
-    // Filter last 3 months
-    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 3);
+    // Filter last 6 months
+    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 6);
     const filtered = rows.filter(r => { const d = new Date(r[0]); return isNaN(d) || d >= cutoff; });
     res.json({ rows: filtered.reverse() }); // newest first
   } catch (e) { res.status(500).json({ error: e.message }); }
