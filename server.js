@@ -183,7 +183,7 @@ app.post('/log', requireAuth, async (req, res) => {
 
 app.get('/log', requireAuth, async (req, res) => {
   try {
-    if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });\
+    if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });
     const tok = await getDriveToken();
     const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A1:D1000`, {
       headers: { Authorization: `Bearer ${tok}` }
