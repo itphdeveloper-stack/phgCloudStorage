@@ -15,7 +15,15 @@ app.use(express.json());
 
 // ── Removed: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN ──
 const SA_EMAIL      = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-const SA_KEY        = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+const SA_KEY = (() => {
+  let k = process.env.GOOGLE_PRIVATE_KEY || '';
+  k = k.replace(/\\n/g, '\n');
+  if (k.includes('-----BEGIN PRIVATE KEY-----') && !k.includes('\n-----END')) {
+    k = k.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+         .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----\n');
+  }
+  return k;
+})();
 const UPLOAD_FOLDER = process.env.UPLOAD_FOLDER_ID || 'root';
 const SHEET_ID      = process.env.USERS_SHEET_ID;
 const INV_SHEET_ID  = process.env.INV_SHEET_ID || '';
