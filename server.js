@@ -1,6 +1,7 @@
 const express = require('express');
 const cors    = require('cors');
 const crypto  = require('crypto');
+const { Redis } = require('@upstash/redis');
 const app     = express();
 
 app.use(cors({
@@ -13,7 +14,6 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// ── Removed: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN ──
 const SA_EMAIL      = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const SA_KEY = (() => {
   let k = process.env.GOOGLE_PRIVATE_KEY || '';
@@ -24,26 +24,32 @@ const SA_KEY = (() => {
   }
   return k;
 })();
-const UPLOAD_FOLDER = process.env.UPLOAD_FOLDER_ID || 'root';
-const SHEET_ID      = process.env.USERS_SHEET_ID;
-const INV_SHEET_ID  = process.env.INV_SHEET_ID || '';
-const INV_PHOTOS_FOLDER = process.env.INV_PHOTOS_FOLDER || '';
-const MAIL_FOLDER_ID       = process.env.MAIL_FOLDER_ID || '';
+const UPLOAD_FOLDER         = process.env.UPLOAD_FOLDER_ID || 'root';
+const SHEET_ID              = process.env.USERS_SHEET_ID;
+const INV_SHEET_ID          = process.env.INV_SHEET_ID || '';
+const INV_PHOTOS_FOLDER     = process.env.INV_PHOTOS_FOLDER || '';
+const MAIL_FOLDER_ID        = process.env.MAIL_FOLDER_ID || '';
 const MAIL_ATTACH_FOLDER_ID = process.env.MAIL_ATTACH_FOLDER_ID || '';
-const PORT          = process.env.PORT || 3000;
+const PORT                  = process.env.PORT || 3000;
 
-// ── Google Service Account token ──────────────────────────────────
-let cachedToken = null, tokenExpiry = 0;
+// ── Upstash Redis (persists OAuth2 refresh token across all instances) ──
+const redis = new Redis({
+  url:   process.env.UPSTASH_REDIS_KV_REST_API_URL,
+  token: process.env.UPSTASH_REDIS_KV_REST_API_TOKEN,
+});
+const KV_REFRESH_TOKEN_KEY = 'oauth_refresh_token';
 
-async function getDriveToken() {
-  if (cachedToken && Date.now() < tokenExpiry - 60000) return cachedToken;
+// ── Service Account token (Sheets only) ──────────────────────────
+let cachedSAToken = null, saTokenExpiry = 0;
+
+async function getSheetsToken() {
+  if (cachedSAToken && Date.now() < saTokenExpiry - 60000) return cachedSAToken;
 
   if (!SA_EMAIL || !SA_KEY) throw new Error('Service account credentials not configured');
 
-  const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+  const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
   const now = Math.floor(Date.now() / 1000);
 
-  // Build JWT header + payload
   const header  = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
   const payload = Buffer.from(JSON.stringify({
     iss: SA_EMAIL,
@@ -53,13 +59,11 @@ async function getDriveToken() {
     exp: now + 3600,
   })).toString('base64url');
 
-  // Sign with private key
   const sign = crypto.createSign('RSA-SHA256');
   sign.update(`${header}.${payload}`);
   const signature = sign.sign(SA_KEY, 'base64url');
   const jwt = `${header}.${payload}.${signature}`;
 
-  // Exchange JWT for access token
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -71,9 +75,60 @@ async function getDriveToken() {
 
   const data = await r.json();
   if (!r.ok || !data.access_token) throw new Error('Service account token failed: ' + (data.error_description || data.error));
-  cachedToken = data.access_token;
-  tokenExpiry = Date.now() + data.expires_in * 1000;
-  return cachedToken;
+  cachedSAToken = data.access_token;
+  saTokenExpiry = Date.now() + data.expires_in * 1000;
+  return cachedSAToken;
+}
+
+// ── OAuth2 Drive token (all Drive operations) ─────────────────────
+let cachedDriveToken = null, driveTokenExpiry = 0;
+
+async function getDriveOAuthToken() {
+  if (cachedDriveToken && Date.now() < driveTokenExpiry - 60000) return cachedDriveToken;
+
+  const clientId     = process.env.OAUTH_CLIENT_ID;
+  const clientSecret = process.env.OAUTH_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) throw new Error('OAuth credentials not configured (OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET)');
+
+  // Read refresh token from Upstash first, fall back to env var on very first run
+  let refreshToken = null;
+  try {
+    refreshToken = await redis.get(KV_REFRESH_TOKEN_KEY);
+  } catch (e) {
+    console.warn('Upstash read failed, falling back to env var:', e.message);
+  }
+
+  if (!refreshToken) {
+    refreshToken = process.env.OAUTH_REFRESH_TOKEN;
+    if (!refreshToken) throw new Error('No OAuth refresh token found in Upstash or env vars');
+    // Seed Upstash with env var value on first run
+    try { await redis.set(KV_REFRESH_TOKEN_KEY, refreshToken); } catch (e) { console.warn('Upstash seed failed:', e.message); }
+  }
+
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id:     clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type:    'refresh_token',
+    }).toString(),
+  });
+
+  const data = await r.json();
+  if (!r.ok || !data.access_token) throw new Error('Drive OAuth token failed: ' + (data.error_description || data.error));
+
+  // If Google rotates the refresh token, save new one to Upstash immediately
+  if (data.refresh_token && data.refresh_token !== refreshToken) {
+    console.log('Google rotated refresh token — saving new one to Upstash');
+    try { await redis.set(KV_REFRESH_TOKEN_KEY, data.refresh_token); } catch (e) { console.warn('Upstash rotation save failed:', e.message); }
+  }
+
+  cachedDriveToken = data.access_token;
+  driveTokenExpiry = Date.now() + data.expires_in * 1000;
+  return cachedDriveToken;
 }
 
 // ── Sessions ──────────────────────────────────────────────────────
@@ -98,12 +153,12 @@ function requireAuth(req, res, next) {
   req.session = s; next();
 }
 
-// ── Users from Sheet ──────────────────────────────────────────────
+// ── Users from Sheet (service account) ───────────────────────────
 let usersCache = null, usersCacheTime = 0;
 
 async function getUsers() {
   if (usersCache && Date.now() - usersCacheTime < 60000) return usersCache;
-  const tok = await getDriveToken();
+  const tok = await getSheetsToken();
   const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet1!A2:D200`, {
     headers: { Authorization: `Bearer ${tok}` }
   });
@@ -136,17 +191,31 @@ app.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── /token — OAuth2 Drive token (used by all frontend Drive calls) ─
 app.get('/token', requireAuth, async (req, res) => {
   try {
-    const token = await getDriveToken();
+    const token = await getDriveOAuthToken();
     const uploadFolder = req.session.role === 'superuser' ? UPLOAD_FOLDER : (req.session.folder_id || UPLOAD_FOLDER);
-    res.json({ access_token: token, upload_folder: uploadFolder, expires_in: Math.floor((tokenExpiry - Date.now()) / 1000), role: req.session.role, folder_id: req.session.folder_id || null, username: req.session.username, users_sheet_id: SHEET_ID, inv_sheet_id: INV_SHEET_ID, inv_photos_folder: INV_PHOTOS_FOLDER, mail_folder_id: MAIL_FOLDER_ID, mail_attach_folder_id: MAIL_ATTACH_FOLDER_ID });
+    res.json({
+      access_token:           token,
+      upload_folder:          uploadFolder,
+      expires_in:             Math.floor((driveTokenExpiry - Date.now()) / 1000),
+      role:                   req.session.role,
+      folder_id:              req.session.folder_id || null,
+      username:               req.session.username,
+      users_sheet_id:         SHEET_ID,
+      inv_sheet_id:           INV_SHEET_ID,
+      inv_photos_folder:      INV_PHOTOS_FOLDER,
+      mail_folder_id:         MAIL_FOLDER_ID,
+      mail_attach_folder_id:  MAIL_ATTACH_FOLDER_ID,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── /sheets/* — Sheets API proxy (service account) ────────────────
 app.all('/sheets/*', requireAuth, async (req, res) => {
   try {
-    const tok = await getDriveToken();
+    const tok = await getSheetsToken();
     const path = req.path.replace('/sheets', '');
     const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
     const url = `https://sheets.googleapis.com/v4/spreadsheets${path}${qs}`;
@@ -171,13 +240,13 @@ app.get('/qr/generate', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Activity Log ──────────────────────────────────────────────────
+// ── Activity Log (service account — Sheets only) ──────────────────
 app.post('/log', requireAuth, async (req, res) => {
   try {
     const { action, detail = '' } = req.body;
     if (!action) return res.status(400).json({ error: 'action required' });
     if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });
-    const tok = await getDriveToken();
+    const tok = await getSheetsToken();
     const now = new Date();
     const timeStr = now.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone:'Asia/Jakarta' });
     const user = req.session.username || '—';
@@ -194,17 +263,16 @@ app.post('/log', requireAuth, async (req, res) => {
 app.get('/log', requireAuth, async (req, res) => {
   try {
     if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });
-    const tok = await getDriveToken();
+    const tok = await getSheetsToken();
     const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A1:D1000`, {
       headers: { Authorization: `Bearer ${tok}` }
     });
     const data = await r.json();
     if (data.error) return res.status(500).json({ error: data.error.message });
     const rows = (data.values || []).slice(1).filter(r => r[0]);
-    // Filter last 6 months
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 6);
     const filtered = rows.filter(r => { const d = new Date(r[0]); return isNaN(d) || d >= cutoff; });
-    res.json({ rows: filtered.reverse() }); // newest first
+    res.json({ rows: filtered.reverse() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
