@@ -13,27 +13,54 @@ app.use(cors({
 }));
 app.use(express.json());
 
-const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
-const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN;
+// ── Removed: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN ──
+const SA_EMAIL      = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+const SA_KEY        = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
 const UPLOAD_FOLDER = process.env.UPLOAD_FOLDER_ID || 'root';
 const SHEET_ID      = process.env.USERS_SHEET_ID;
 const INV_SHEET_ID  = process.env.INV_SHEET_ID || '';
 const INV_PHOTOS_FOLDER = process.env.INV_PHOTOS_FOLDER || '';
 const PORT          = process.env.PORT || 3000;
 
-// ── Google token ──────────────────────────────────────────────────
+// ── Google Service Account token ──────────────────────────────────
 let cachedToken = null, tokenExpiry = 0;
 
 async function getDriveToken() {
   if (cachedToken && Date.now() < tokenExpiry - 60000) return cachedToken;
+
+  if (!SA_EMAIL || !SA_KEY) throw new Error('Service account credentials not configured');
+
+  const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+  const now = Math.floor(Date.now() / 1000);
+
+  // Build JWT header + payload
+  const header  = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    iss: SA_EMAIL,
+    scope: SCOPES,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  })).toString('base64url');
+
+  // Sign with private key
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(`${header}.${payload}`);
+  const signature = sign.sign(SA_KEY, 'base64url');
+  const jwt = `${header}.${payload}.${signature}`;
+
+  // Exchange JWT for access token
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, refresh_token: REFRESH_TOKEN, grant_type: 'refresh_token' }).toString(),
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    }).toString(),
   });
+
   const data = await r.json();
-  if (!r.ok || !data.access_token) throw new Error('Token refresh failed: ' + (data.error_description || data.error));
+  if (!r.ok || !data.access_token) throw new Error('Service account token failed: ' + (data.error_description || data.error));
   cachedToken = data.access_token;
   tokenExpiry = Date.now() + data.expires_in * 1000;
   return cachedToken;
@@ -156,7 +183,7 @@ app.post('/log', requireAuth, async (req, res) => {
 
 app.get('/log', requireAuth, async (req, res) => {
   try {
-    if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });
+    if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });\
     const tok = await getDriveToken();
     const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A1:D1000`, {
       headers: { Authorization: `Bearer ${tok}` }
