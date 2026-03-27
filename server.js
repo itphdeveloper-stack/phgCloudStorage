@@ -28,6 +28,8 @@ const UPLOAD_FOLDER = process.env.UPLOAD_FOLDER_ID || 'root';
 const SHEET_ID      = process.env.USERS_SHEET_ID;
 const INV_SHEET_ID  = process.env.INV_SHEET_ID || '';
 const INV_PHOTOS_FOLDER = process.env.INV_PHOTOS_FOLDER || '';
+const MAIL_FOLDER_ID       = process.env.MAIL_FOLDER_ID || '';
+const MAIL_ATTACH_FOLDER_ID = process.env.MAIL_ATTACH_FOLDER_ID || '';
 const PORT          = process.env.PORT || 3000;
 
 // ── Google Service Account token ──────────────────────────────────
@@ -138,7 +140,7 @@ app.get('/token', requireAuth, async (req, res) => {
   try {
     const token = await getDriveToken();
     const uploadFolder = req.session.role === 'superuser' ? UPLOAD_FOLDER : (req.session.folder_id || UPLOAD_FOLDER);
-    res.json({ access_token: token, upload_folder: uploadFolder, expires_in: Math.floor((tokenExpiry - Date.now()) / 1000), role: req.session.role, folder_id: req.session.folder_id || null, username: req.session.username, users_sheet_id: SHEET_ID, inv_sheet_id: INV_SHEET_ID, inv_photos_folder: INV_PHOTOS_FOLDER });
+    res.json({ access_token: token, upload_folder: uploadFolder, expires_in: Math.floor((tokenExpiry - Date.now()) / 1000), role: req.session.role, folder_id: req.session.folder_id || null, username: req.session.username, users_sheet_id: SHEET_ID, inv_sheet_id: INV_SHEET_ID, inv_photos_folder: INV_PHOTOS_FOLDER, mail_folder_id: MAIL_FOLDER_ID, mail_attach_folder_id: MAIL_ATTACH_FOLDER_ID });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
