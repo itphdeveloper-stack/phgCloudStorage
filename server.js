@@ -153,6 +153,15 @@ function requireAuth(req, res, next) {
   req.session = s; next();
 }
 
+// ── Password hashing ─────────────────────────────────────────────
+function sha256(str) {
+  return crypto.createHash('sha256').update(str).digest('hex');
+}
+// Accepts both plain-text (legacy) and sha256-hashed passwords
+function passwordMatches(input, stored) {
+  return stored === input || stored === sha256(input);
+}
+
 // ── Users from Sheet (service account) ───────────────────────────
 let usersCache = null, usersCacheTime = 0;
 
@@ -179,7 +188,7 @@ app.post('/login', async (req, res) => {
     const { username, password } = req.body || {};
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
     const users = await getUsers();
-    const user = users.find(u => u.username === username.trim().toLowerCase() && u.password === password);
+    const user = users.find(u => u.username === username.trim().toLowerCase() && passwordMatches(password, u.password));
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
     const sessionToken = createSession({ username: user.username, role: user.role, folder_id: user.folder_id });
     res.json({ session_token: sessionToken, username: user.username, role: user.role, folder_id: user.folder_id || null });
@@ -226,6 +235,12 @@ app.all('/sheets/*', requireAuth, async (req, res) => {
     res.status(r.status).set('content-type', ct);
     ct.includes('application/json') ? res.json(await r.json()) : res.send(Buffer.from(await r.arrayBuffer()));
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Bust users cache (call after saving/changing passwords) ───────
+app.post('/users/bust-cache', requireAuth, (req, res) => {
+  usersCache = null; usersCacheTime = 0;
+  res.json({ ok: true });
 });
 
 app.get('/qr/generate', requireAuth, async (req, res) => {
