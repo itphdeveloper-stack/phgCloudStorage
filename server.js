@@ -6,9 +6,15 @@ const app     = express();
 
 app.use(cors({
   origin: (origin, cb) => {
-    const allowed = process.env.PORTAL_ORIGIN;
-    if (!origin || !allowed || origin === allowed) cb(null, true);
-    else cb(new Error('Not allowed by CORS'));
+    const allowed = process.env.PORTAL_ORIGIN; // e.g. https://phgcloudstorage.pages.dev
+    // Extract base domain from PORTAL_ORIGIN to allow all preview subdomains
+    // e.g. https://phgcloudstorage.pages.dev → .phgcloudstorage.pages.dev
+    const allowedHost = allowed ? allowed.replace(/^https?:\/\//, '') : null;
+    const isAllowed =
+      !origin ||
+      origin === allowed ||
+      (allowedHost && origin.endsWith('.' + allowedHost));
+    isAllowed ? cb(null, true) : cb(new Error('Not allowed by CORS'));
   },
   credentials: true
 }));
