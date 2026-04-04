@@ -6,15 +6,9 @@ const app     = express();
 
 app.use(cors({
   origin: (origin, cb) => {
-    const allowed = process.env.PORTAL_ORIGIN; // e.g. https://phgcloudstorage.pages.dev
-    // Extract base domain from PORTAL_ORIGIN to allow all preview subdomains
-    // e.g. https://phgcloudstorage.pages.dev → .phgcloudstorage.pages.dev
-    const allowedHost = allowed ? allowed.replace(/^https?:\/\//, '') : null;
-    const isAllowed =
-      !origin ||
-      origin === allowed ||
-      (allowedHost && origin.endsWith('.' + allowedHost));
-    isAllowed ? cb(null, true) : cb(new Error('Not allowed by CORS'));
+    const allowed = process.env.PORTAL_ORIGIN;
+    if (!origin || !allowed || origin === allowed) cb(null, true);
+    else cb(new Error('Not allowed by CORS'));
   },
   credentials: true
 }));
@@ -294,6 +288,46 @@ app.get('/log', requireAuth, async (req, res) => {
     const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 6);
     const filtered = rows.filter(r => { const d = new Date(r[0]); return isNaN(d) || d >= cutoff; });
     res.json({ rows: filtered.reverse() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
+// ── Public item detail (no auth — for QR scan) ───────────────────
+app.get('/item/:id', async (req, res) => {
+  try {
+    const itemId = req.params.id;
+    if (!INV_SHEET_ID) return res.status(500).json({ error: 'INV_SHEET_ID not configured' });
+    const tok = await getSheetsToken();
+
+    // Read inventory sheet
+    const sheetR = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${INV_SHEET_ID}/values/Sheet1!A2:H500`, {
+      headers: { Authorization: `Bearer ${tok}` }
+    });
+    const sheetData = await sheetR.json();
+    if (sheetData.error) return res.status(500).json({ error: sheetData.error.message });
+
+    const row = (sheetData.values || []).find(r => r[0] === itemId);
+    if (!row) return res.status(404).json({ error: 'Item not found' });
+
+    const item = {
+      id: row[0]||'', name: row[1]||'', spec: row[2]||'',
+      branch: row[3]||'', position: row[4]||'', assigned: row[5]||'',
+      dateBought: row[6]||'', dateRecorded: row[7]||''
+    };
+
+    // Get photo file IDs from Drive
+    let photos = [];
+    try {
+      const driveTok = await getDriveOAuthToken();
+      const q = encodeURIComponent(`'${INV_PHOTOS_FOLDER}' in parents and name contains '${itemId}_' and trashed=false`);
+      const driveR = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType)&orderBy=name&supportsAllDrives=true`, {
+        headers: { Authorization: `Bearer ${driveTok}` }
+      });
+      const driveData = await driveR.json();
+      photos = (driveData.files || []).filter(f => f.mimeType.startsWith('image/')).map(f => f.id);
+    } catch(e) { /* photos optional */ }
+
+    res.json({ item, photos });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
