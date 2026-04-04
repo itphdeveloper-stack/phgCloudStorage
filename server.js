@@ -6,9 +6,15 @@ const app     = express();
 
 app.use(cors({
   origin: (origin, cb) => {
-    const allowed = process.env.PORTAL_ORIGIN;
-    if (!origin || !allowed || origin === allowed) cb(null, true);
-    else cb(new Error('Not allowed by CORS'));
+    const allowed = process.env.PORTAL_ORIGIN; // e.g. https://phgcloudstorage.pages.dev
+    // Extract base domain to also allow all preview subdomains
+    // e.g. https://phgcloudstorage.pages.dev → .phgcloudstorage.pages.dev
+    const allowedHost = allowed ? allowed.replace(/^https?:\/\//, '') : null;
+    const isAllowed =
+      !origin ||
+      origin === allowed ||
+      (allowedHost && origin.endsWith('.' + allowedHost));
+    isAllowed ? cb(null, true) : cb(new Error('Not allowed by CORS'));
   },
   credentials: true
 }));
@@ -329,6 +335,45 @@ app.get('/item/:id', async (req, res) => {
 
     res.json({ item, photos });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── /file/:id — Public Drive file proxy (for QR scan photo display) ─
+// Streams Drive files through the backend using OAuth token,
+// so unauthenticated visitors can view inventory photos via QR scan.
+app.get('/file/:id', async (req, res) => {
+  try {
+    const tok = await getDriveOAuthToken();
+    const fileId = req.params.id;
+
+    // First get file metadata to validate it's an image
+    const metaR = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=mimeType,name&supportsAllDrives=true`, {
+      headers: { Authorization: `Bearer ${tok}` }
+    });
+    if (!metaR.ok) return res.status(metaR.status).json({ error: 'File not found' });
+    const meta = await metaR.json();
+    if (!meta.mimeType?.startsWith('image/')) return res.status(403).json({ error: 'Only image files can be proxied' });
+
+    // Stream the file content
+    const fileR = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`, {
+      headers: { Authorization: `Bearer ${tok}` }
+    });
+    if (!fileR.ok) return res.status(fileR.status).json({ error: 'Could not fetch file' });
+
+    res.set('Content-Type', meta.mimeType);
+    res.set('Cache-Control', 'public, max-age=3600'); // cache 1hr in browser/CDN
+
+    // Stream response body to client
+    const reader = fileR.body.getReader();
+    const pump = async () => {
+      const { done, value } = await reader.read();
+      if (done) { res.end(); return; }
+      res.write(Buffer.from(value));
+      await pump();
+    };
+    await pump();
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 if (require.main === module) {
