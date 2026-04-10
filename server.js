@@ -381,13 +381,13 @@ app.get('/users/info', async (req, res) => {
   if (!username) return res.json({});
   try {
     const tok = await getSheetsToken();
-    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet1!A2:H200`, {
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet1!A2:H200?valueRenderOption=FORMATTED_VALUE`, {
       headers: { Authorization: `Bearer ${tok}` }
     });
     const data = await r.json();
     const row = (data.values || []).find(r => (r[0] || '').trim().toLowerCase() === username);
     if (!row) return res.json({});
-    res.json({ branch: row[4] || '', position: row[7] || '' });
+    res.json({ branch: row[4] || '', position: row[5] || '' });
   } catch(e) { res.json({}); }
 });
 
