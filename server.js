@@ -376,12 +376,6 @@ app.get('/file/:id', async (req, res) => {
   }
 });
 
-if (require.main === module) {
-  app.listen(PORT, () => console.log(`✅  PHG Portal running on port ${PORT}`));
-}
-
-module.exports = app;
-
 app.get('/users/info', async (req, res) => {
   const username = (req.query.username || '').trim().toLowerCase();
   if (!username) return res.json({});
@@ -393,3 +387,8 @@ app.get('/users/info', async (req, res) => {
   } catch(e) { res.json({}); }
 });
 
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`✅  PHG Portal running on port ${PORT}`));
+}
+
+module.exports = app;
