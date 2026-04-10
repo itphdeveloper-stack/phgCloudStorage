@@ -381,3 +381,15 @@ if (require.main === module) {
 }
 
 module.exports = app;
+
+app.get('/users/info', async (req, res) => {
+  const username = (req.query.username || '').trim().toLowerCase();
+  if (!username) return res.json({});
+  try {
+    const rows = await getSheetValues('Sheet1!A2:H200'); // your existing helper
+    const row = rows.find(r => (r[0] || '').trim().toLowerCase() === username);
+    if (!row) return res.json({});
+    res.json({ branch: row[4] || '', position: row[7] || '' });
+  } catch(e) { res.json({}); }
+});
+
