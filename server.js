@@ -174,23 +174,14 @@ let usersCache = null, usersCacheTime = 0;
 async function getUsers() {
   if (usersCache && Date.now() - usersCacheTime < 60000) return usersCache;
   const tok = await getSheetsToken();
-  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet1!A2:G200`, {
+  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet1!A2:D200`, {
     headers: { Authorization: `Bearer ${tok}` }
   });
   if (!r.ok) throw new Error('Could not read users sheet: ' + r.statusText);
   const data = await r.json();
   usersCache = (data.values || [])
     .filter(row => row[0] && row[1] && row[2])
-    // Columns: A=username, B=password, C=role, D=folder_id, E=branch, F=position, G=email
-    .map(row => ({
-      username:  row[0].trim().toLowerCase(),
-      password:  row[1].trim(),
-      role:      row[2].trim().toLowerCase(),
-      folder_id: row[3]?.trim() || null,
-      branch:    row[4]?.trim() || '',
-      position:  row[5]?.trim() || '',
-      email:     row[6]?.trim().toLowerCase() || '',
-    }));
+    .map(row => ({ username: row[0].trim().toLowerCase(), password: row[1].trim(), role: row[2].trim().toLowerCase(), folder_id: row[3]?.trim() || null }));
   usersCacheTime = Date.now();
   return usersCache;
 }
@@ -200,11 +191,11 @@ app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISO
 
 app.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
     const users = await getUsers();
-    const user = users.find(u => u.email === email.trim().toLowerCase() && passwordMatches(password, u.password));
-    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+    const user = users.find(u => u.username === username.trim().toLowerCase() && passwordMatches(password, u.password));
+    if (!user) return res.status(401).json({ error: 'Invalid username or password' });
     const sessionToken = createSession({ username: user.username, role: user.role, folder_id: user.folder_id });
     res.json({ session_token: sessionToken, username: user.username, role: user.role, folder_id: user.folder_id || null });
   } catch (e) { console.error('Login error:', e); res.status(500).json({ error: e.message }); }
@@ -385,7 +376,20 @@ app.get('/file/:id', async (req, res) => {
   }
 });
 
-// /users/info endpoint removed — login now uses email, branch/position no longer shown on login screen
+app.get('/users/info', async (req, res) => {
+  const username = (req.query.username || '').trim().toLowerCase();
+  if (!username) return res.json({});
+  try {
+    const tok = await getSheetsToken();
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet1!A2:H200?valueRenderOption=FORMATTED_VALUE`, {
+      headers: { Authorization: `Bearer ${tok}` }
+    });
+    const data = await r.json();
+    const row = (data.values || []).find(r => (r[0] || '').trim().toLowerCase() === username);
+    if (!row) return res.json({});
+    res.json({ branch: row[4] || '', position: row[5] || '' });
+  } catch(e) { res.json({}); }
+});
 
 if (require.main === module) {
   app.listen(PORT, () => console.log(`✅  PHG Portal running on port ${PORT}`));
