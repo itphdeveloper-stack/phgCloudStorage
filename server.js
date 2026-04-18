@@ -137,26 +137,35 @@ async function getDriveOAuthToken() {
   return cachedDriveToken;
 }
 
-// ── Sessions ──────────────────────────────────────────────────────
-const sessions = new Map();
-const SESSION_TTL = 8 * 60 * 60 * 1000;
+// ── Sessions (Redis-backed, sliding expiry) ───────────────────────
+const SESSION_TTL_SEC = 8 * 60 * 60; // 8 hours in seconds
 
-function createSession(user) {
+async function createSession(user) {
   const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, { ...user, expires: Date.now() + SESSION_TTL });
+  await redis.set(`session:${token}`, JSON.stringify(user), { ex: SESSION_TTL_SEC });
   return token;
 }
-function validateSession(token) {
+async function validateSession(token) {
   if (!token) return null;
-  const s = sessions.get(token);
-  if (!s) return null;
-  if (Date.now() > s.expires) { sessions.delete(token); return null; }
-  return s;
+  try {
+    const raw = await redis.get(`session:${token}`);
+    if (!raw) return null;
+    // Slide the expiry on every use — keeps active users logged in
+    await redis.expire(`session:${token}`, SESSION_TTL_SEC);
+    return typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (e) {
+    console.warn('Session Redis error:', e.message);
+    return null;
+  }
+}
+async function deleteSession(token) {
+  if (token) await redis.del(`session:${token}`).catch(()=>{});
 }
 function requireAuth(req, res, next) {
-  const s = validateSession(req.headers['x-session-token']);
-  if (!s) return res.status(401).json({ error: 'Unauthorized' });
-  req.session = s; next();
+  validateSession(req.headers['x-session-token']).then(s => {
+    if (!s) return res.status(401).json({ error: 'Unauthorized' });
+    req.session = s; next();
+  }).catch(() => res.status(401).json({ error: 'Unauthorized' }));
 }
 
 // ── Password hashing ─────────────────────────────────────────────
@@ -205,13 +214,13 @@ app.post('/login', async (req, res) => {
     const users = await getUsers();
     const user = users.find(u => u.email === email.trim().toLowerCase() && passwordMatches(password, u.password));
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
-    const sessionToken = createSession({ username: user.username, role: user.role, folder_id: user.folder_id });
+    const sessionToken = await createSession({ username: user.username, role: user.role, folder_id: user.folder_id });
     res.json({ session_token: sessionToken, username: user.username, role: user.role, folder_id: user.folder_id || null });
   } catch (e) { console.error('Login error:', e); res.status(500).json({ error: e.message }); }
 });
 
-app.post('/logout', (req, res) => {
-  sessions.delete(req.headers['x-session-token']);
+app.post('/logout', async (req, res) => {
+  await deleteSession(req.headers['x-session-token']);
   res.json({ ok: true });
 });
 
