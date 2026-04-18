@@ -214,8 +214,8 @@ app.post('/login', async (req, res) => {
     const users = await getUsers();
     const user = users.find(u => u.email === email.trim().toLowerCase() && passwordMatches(password, u.password));
     if (!user) return res.status(401).json({ error: 'Invalid email or password' });
-    const sessionToken = await createSession({ username: user.username, role: user.role, folder_id: user.folder_id });
-    res.json({ session_token: sessionToken, username: user.username, role: user.role, folder_id: user.folder_id || null });
+    const sessionToken = await createSession({ username: user.username, email: user.email, role: user.role, folder_id: user.folder_id });
+    res.json({ session_token: sessionToken, username: user.username, email: user.email, role: user.role, folder_id: user.folder_id || null });
   } catch (e) { console.error('Login error:', e); res.status(500).json({ error: e.message }); }
 });
 
@@ -236,6 +236,7 @@ app.get('/token', requireAuth, async (req, res) => {
       role:                   req.session.role,
       folder_id:              req.session.folder_id || null,
       username:               req.session.username,
+      email:                  req.session.email || '',
       users_sheet_id:         SHEET_ID,
       inv_sheet_id:           INV_SHEET_ID,
       inv_photos_folder:      INV_PHOTOS_FOLDER,
@@ -288,7 +289,7 @@ app.post('/log', requireAuth, async (req, res) => {
     const tok = await getSheetsToken();
     const now = new Date();
     const timeStr = now.toLocaleString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', timeZone:'Asia/Jakarta' });
-    const user = req.session.username || '—';
+    const user = req.session.email || req.session.username || '—';
     const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A:D:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
