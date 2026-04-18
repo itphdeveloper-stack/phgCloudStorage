@@ -294,14 +294,20 @@ app.get('/log', requireAuth, async (req, res) => {
   try {
     if (!SHEET_ID) return res.status(500).json({ error: 'SHEET_ID not configured' });
     const tok = await getSheetsToken();
-    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A1:D1000`, {
+    const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Sheet3!A2:D`, {
       headers: { Authorization: `Bearer ${tok}` }
     });
     const data = await r.json();
     if (data.error) return res.status(500).json({ error: data.error.message });
-    const rows = (data.values || []).slice(1).filter(r => r[0]);
-    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth() - 6);
-    const filtered = rows.filter(r => { const d = new Date(r[0]); return isNaN(d) || d >= cutoff; });
+    const rows = (data.values || []).filter(r => r[0]);
+    // Parse "DD/MM/YYYY, HH:MM:SS" correctly
+    const parseLogDate = str => {
+      const m = str && str.match(/(\d{2})\/(\d{2})\/(\d{4}),?\s*(\d{2}):(\d{2}):(\d{2})/);
+      if (!m) return null;
+      return new Date(+m[3], +m[2]-1, +m[1], +m[4], +m[5], +m[6]);
+    };
+    const cutoff = new Date(Date.now() - 72*60*60*1000);
+    const filtered = rows.filter(r => { const d = parseLogDate(r[0]); return d && d >= cutoff; });
     res.json({ rows: filtered.reverse() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
