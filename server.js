@@ -7,19 +7,13 @@ const app     = express();
 app.use(cors({
   origin: (origin, cb) => {
     const allowed = process.env.PORTAL_ORIGIN; // e.g. https://phgcloudstorage.pages.dev
+    // Extract base domain to also allow all preview subdomains
+    // e.g. https://phgcloudstorage.pages.dev → .phgcloudstorage.pages.dev
     const allowedHost = allowed ? allowed.replace(/^https?:\/\//, '') : null;
-    // allowedHost = "phgcloudstorage.pages.dev"
-    // Cloudflare preview URLs come in two forms:
-    //   https://<hash>.phgcloudstorage.pages.dev   (subdomain match)
-    //   https://<hash>-phgcloudstorage.pages.dev   (dash-separated on pages.dev)
-    const projectSlug = allowedHost ? allowedHost.replace('.pages.dev', '') : null;
-    const isPreview = projectSlug && origin &&
-      new RegExp(`^https://[a-z0-9]+-${projectSlug}\\.pages\\.dev$`).test(origin);
     const isAllowed =
       !origin ||
       origin === allowed ||
-      (allowedHost && origin.endsWith('.' + allowedHost)) ||
-      isPreview;
+      (allowedHost && origin.endsWith('.' + allowedHost));
     isAllowed ? cb(null, true) : cb(new Error('Not allowed by CORS'));
   },
   credentials: true
